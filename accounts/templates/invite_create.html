@@ -1,8 +1,11 @@
 {% extends "base.html" %}
 {% load crispy_forms_tags %}
+{% load static %}
 
 {% block head %}
 {{ form.media }}
+<link href="{% static 'taginput/bootstrap-tagsinput.css' %}" rel="stylesheet">
+<link href="{% static 'taginput/bootstrap-tagsinput-typeahead.css' %}" rel="stylesheet">
 {% endblock %}
 
 {% block body_content %}
@@ -39,9 +42,10 @@
               {% endif %}
 
               <form method="post">{% csrf_token %}
+                <label>Emails</label>
+                <input type="text" name="emails" id="emails" data-role="tagsinput" />
                 {{ form|crispy }}
                 {% if form.errors %}
-                    <p>{{ form.errors }}</p>
                     <p>You can have {{ user.customer.subscription.plan_users }} user{{ user.customer.subscription.plan_users|pluralize}} on your plan.  To add more users, please upgrade your plan <a href="{% url 'accounts-settings-add-credit-card' %}{%if user.customer.subscription.no_card_on_file %}?add_card=1{% endif %}">here</a></p>
                 {% endif %}
                 <input type="submit" name="action" value="Invite Users" class="btn btn-primary">
@@ -53,4 +57,46 @@
     </div>
   </div>
 </div>
+{% endblock %}
+{% block script %}
+<script>
+$(document).ready(function() {
+    $('#emails').on('itemAdded', function(event) {
+        if(!validateEmail(event.item)) {
+            $('#emails').tagsinput('remove', event.item);
+        }
+    });
+})
+function validateEmail(email) {
+    const re = /^(([^<>()\[\]\\.,;:\s@"]+(\.[^<>()\[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/;
+    return re.test(String(email).toLowerCase());
+}
+</script>
+<!-- these three scripts included for problem splitter feature -->
+<script src="{% static 'taginput/bootstrap-tagsinput.min.js' %}"></script>
+<script src="{% static 'taginput/bootstrap-tagsinput.js' %}"></script>
+<!-- end problem_splitter includes -->
+<style type="text/css" rel="stylesheet" media="all">
+    .bootstrap-tagsinput {
+        width: 100%
+    }
+    .label-info {
+        background-color: #5bc0de
+    }
+    .label {
+        display: inline;
+        padding: .2em .6em .3em;
+        font-size: 75%;
+        font-weight: 700;
+        line-height: 1;
+        color: #fff;
+        text-align: center;
+        white-space: nowrap;
+        vertical-align: baseline;
+        border-radius: .25em;
+    }
+    .alert.alert-danger {
+        padding: 0 1.25rem
+    }
+</style>
 {% endblock %}

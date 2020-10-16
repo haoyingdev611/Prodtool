@@ -45,6 +45,8 @@ ALLOWED_HOSTS = [
     "comitis.serveo.net",
 ]
 
+APP_URL = 'http://localhost:8000'
+
 # For Debug toolbar
 INTERNAL_IPS = [
     "127.0.0.1",

@@ -10,6 +10,7 @@ from django.template import loader
 from urllib.parse import quote
 from stripe.error import CardError
 
+from django.conf import settings
 from appaccounts.models import AppCompany, AppUser
 from internal_analytics import tracking
 from sharedwidgets.widgets import SelectWidget
@@ -305,7 +306,6 @@ class UserUpdateForm(forms.ModelForm):
 class InvitationCreateForm(forms.ModelForm):
 
     email = forms.CharField(widget=forms.HiddenInput(), required = False)
-    emails= forms.CharField()
     
     field_order = ['email', 'emails', 'role']
 
@@ -315,7 +315,10 @@ class InvitationCreateForm(forms.ModelForm):
     
     def clean(self):
         cleaned_data = super(InvitationCreateForm, self).clean()
-        emails = self.cleaned_data.get('emails')
+        emails = self.request.POST['emails']
+        if(emails == ''):
+            raise forms.ValidationError('Please input emails.')
+
         email_list = emails.replace(' ', '').split(',')
 
         existing_users = Invitation.objects.filter(customer=self.request.user.customer).count()
@@ -361,7 +364,7 @@ class InvitationCreateForm(forms.ModelForm):
         )
 
         invitation = Invitation.objects.get(email=email)
-        url = 'localhost:8000/app/accounts/' + str(invitation.id) + '/sign-up'
+        url = settings.APP_URL + '/app/accounts/' + str(invitation.id) + '/sign-up'
         
         html_body = loader.render_to_string(
             "email/invitation_email.html",
