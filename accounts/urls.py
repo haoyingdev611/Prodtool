@@ -67,5 +67,10 @@ urlpatterns = [
     path('users/update/<int:pk>', views.UserUpdateItemView.as_view(), name='accounts-user-update-item'),
     path('users/delete/<int:pk>', views.UserDeleteItemView.as_view(), name='accounts-user-delete-item'),
 
+    path('invites/', views.InvitationListView.as_view(), name='accounts-invitation-list'),
+    path('invites/create/', views.InviteCreateItemView.as_view(), name='accounts-invitation-create-item'),
+
+    path('<int:id>/sign-up/', views.sign_up, name='accounts-sign-up'),
+
     path('stripe-webhook/', views.stripe_webhook, name='accounts-stripe-webhook'),
 ]

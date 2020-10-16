@@ -248,6 +248,24 @@ class Customer(models.Model):
         self.save()
 
 
+class Invitation(models.Model):
+    ROLE_OWNER = "OWNER"
+    ROLE_ADMIN = "ADMIN"
+    ROLE_SUBMITTER = "SUBMITTER"
+    ROLE_CHOICES = (
+        (ROLE_OWNER, "Owner"),
+        (ROLE_ADMIN, "Admin"),
+        (ROLE_SUBMITTER, "Submitter"),
+    )
+
+    email = models.EmailField(_("email address"), unique=True, blank=True)
+    expired = models.BooleanField(default=False)
+    customer = models.ForeignKey(Customer, null=True, on_delete=models.CASCADE)
+    role = models.CharField(choices=ROLE_CHOICES, default=ROLE_SUBMITTER, max_length=30)
+
+    def __str__(self):
+        return self.email
+
 class SubscriptionManager(models.Manager):
     def create_stripe_subscription(self, user, plan):
         stripe.api_key = settings.STRIPE_API_KEY

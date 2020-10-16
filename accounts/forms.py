@@ -3,6 +3,11 @@ from django.contrib.auth import password_validation
 from django.contrib.auth.forms import AuthenticationForm, UsernameField
 from django.core.exceptions import ValidationError
 from django.urls import reverse_lazy
+from django.core.validators import validate_email
+from django.core.exceptions import ValidationError
+from django.core.mail import EmailMessage, EmailMultiAlternatives, mail_admins
+from django.template import loader
+from urllib.parse import quote
 from stripe.error import CardError
 
 from appaccounts.models import AppCompany, AppUser
@@ -16,6 +21,7 @@ from .models import (
     StatusEmailSettings,
     Subscription,
     User,
+    Invitation,
     validate_domain,
 )
 
@@ -295,6 +301,93 @@ class UserUpdateForm(forms.ModelForm):
         labels = {
             "job": "What team is this user on?",
         }
+
+class InvitationCreateForm(forms.ModelForm):
+
+    email = forms.CharField(widget=forms.HiddenInput(), required = False)
+    emails= forms.CharField()
+    
+    field_order = ['email', 'emails', 'role']
+
+    def __init__(self, *args, **kwargs):
+        self.request = kwargs.pop("request")
+        super().__init__(*args, **kwargs)
+    
+    def clean(self):
+        cleaned_data = super(InvitationCreateForm, self).clean()
+        emails = self.cleaned_data.get('emails')
+        email_list = emails.replace(' ', '').split(',')
+
+        existing_users = Invitation.objects.filter(customer=self.request.user.customer).count()
+        max_users = self.request.user.customer.subscription.plan_users()
+
+        if(max_users != 'Unlimited'):
+            if(int(max_users) - 1 < existing_users + len(email_list)):
+                raise forms.ValidationError('You can not invite users anymore.')
+
+        for email in email_list:
+            try:
+                validate_email(email)
+            except ValidationError:
+                raise forms.ValidationError("Your input contains an invalid email.")
+
+            if(Invitation.objects.filter(email=email).count() > 0):
+                raise forms.ValidationError("Your input contains an existing email.")
+        return cleaned_data
+
+    def clean_email(self):
+        return self.cleaned_data["email"].lower()
+
+    def save(self, commit=True):
+        invite = super().save(commit=False)
+        if commit:
+            customer = self.request.user.customer
+            invite.customer = customer
+            role = self.request.POST['role']
+            emails = self.request.POST['emails'].split(',')
+            for email in emails:
+                invite.email = email
+                Invitation.objects.create(email=email, role=role, customer=customer)
+                self.send_invitation_email(email)
+
+        return invite
+    
+    def send_invitation_email(self, email):
+        subject = f"{self.request.user.get_full_name()} has invited you to join Savio"
+        reply_to = [self.request.user.email]
+
+        from_email = (
+            f"{self.request.user.get_full_name()} via Savio <email@mg.savio.io>"
+        )
+
+        invitation = Invitation.objects.get(email=email)
+        url = 'localhost:8000/app/accounts/' + str(invitation.id) + '/sign-up'
+        
+        html_body = loader.render_to_string(
+            "email/invitation_email.html",
+            {
+                "customer": quote(self.request.user.customer.name),
+                "invitation_url": url
+            },
+        )
+
+        txt_email = loader.render_to_string(
+            "email/invitation_email.txt", {"body": 'You have been invited to Savio',},
+        )
+
+        msg = EmailMultiAlternatives(
+            subject,
+            txt_email,
+            from_email,
+            [email],
+        )
+
+        msg.attach_alternative(html_body, "text/html")
+        msg.send()
+
+    class Meta:
+        model = Invitation
+        fields = ("email", "role")
 
 
 class WhitelistForm(forms.ModelForm):

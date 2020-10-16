@@ -38,6 +38,7 @@ from .forms import (
     SubscriptionEditForm,
     UserCreateForm,
     UserUpdateForm,
+    InvitationCreateForm,
     WhitelistForm,
     WhitelistSettingsForm,
 )
@@ -50,6 +51,7 @@ from .models import (
     StatusEmailSettings,
     Subscription,
     User,
+    Invitation
 )
 from .tasks import send_signup_survey_email
 
@@ -175,6 +177,73 @@ def join(request):
         request, "join.html", {"form": form, "code": code, "promo_text": promo_text},
     )
 
+
+def sign_up(request, id):
+    if request.method == "POST":
+        form = JoinForm(request.POST)
+        if form.is_valid():
+            form.save()
+            email = form.cleaned_data.get("email")
+            raw_password = form.cleaned_data.get("password1")
+            user = authenticate(username=email, password=raw_password)
+            login(request, user)
+
+            customer = user.customer
+            customer.first_referer = request.COOKIES.get("first_referer", "None")
+            customer.first_landing_page = request.COOKIES.get(
+                "first_landing_page", "None"
+            )
+            customer.last_referer = request.COOKIES.get("last_referer", "None")
+            customer.last_landing_page = request.COOKIES.get(
+                "last_landing_page", "None"
+            )
+            customer.save()
+
+            marketing_info = f"first_referer: {customer.first_referer}\r\nfirst_landing_page: {customer.first_landing_page}\r\nlast_referer: {customer.last_referer}\r\nlast_landing_page: {customer.last_landing_page}"
+
+            
+            plan = form.cleaned_data.get("plan")
+            if plan == "smb":
+                stripe_plan = Subscription.PLAN_3_USERS_25
+            elif plan == "growth":
+                stripe_plan = Subscription.PLAN_UNLIMITED_USERS_49
+            else:
+                stripe_plan = Subscription.PLAN_1_USER_FREE
+
+            quoted_email = parse.quote(f'"{user.email}"', safe="")
+            fs_url = f"https://app.fullstory.com/ui/J3A37/segments/everyone/people:search:((NOW%2FDAY-29DAY:NOW%2FDAY%2B1DAY):((UserEmail:==:{quoted_email})):():():():)/0"
+            li_string = f"{user.first_name} {user.last_name} {user.customer.name}"
+            quoated_li_string = parse.quote(li_string, safe="")
+            li_url = f"https://www.linkedin.com/search/results/all/?keywords={quoated_li_string}"
+
+            Subscription.objects.create_stripe_subscription(user, stripe_plan)
+
+            # Send ourselves an email whenever a new user signs up.
+            li_url = (
+                "https://www.linkedin.com/search/results/all/?keywords="
+                + parse.quote(li_string, safe="")
+            )
+
+            send_mail(
+                f"[Savio] New Sign-up: {user.email} @ {user.customer.name} ({plan})",
+                f"Full name:\r\n {user.first_name} {user.last_name}\r\n\r\nFullStory:\r\n{fs_url}\r\n\r\n LinkedIn: \r\n{li_url}\r\n\r\nMarketing Info:\r\n{marketing_info}\r\n\r\nOnboarding Percent:\r\nhttps://www.savio.io/admin/accounts/customer/\r\n\r\nNothing more to say lads.  Onward.",
+                "help@savio.io",
+                ["k@savio.io", "ryan@savio.io"],
+            )
+
+            OnboardingTask.objects.create_initial_tasks(user.customer)
+
+            send_signup_survey_email.apply_async(args=[user.id,], countdown=60 * 5)
+
+            return redirect(reverse("login"))
+        else:
+            invitation = Invitation.objects.get(pk=id)
+    else:
+        invitation = Invitation.objects.get(pk=id)
+        form = JoinForm(initial={'email': invitation.email})
+    return render(
+        request, "sign_up.html", {"form": form, "email": invitation.email},
+    )
 
 @method_decorator(role_required(User.ROLE_OWNER), name="dispatch")
 class SubscriptionUpdateItemView(SuccessMessageMixin, UpdateView):
@@ -642,6 +711,16 @@ class UserListView(ListView):
         return User.objects.filter(customer=self.request.user.customer)
 
 
+@method_decorator(role_required(User.ROLE_OWNER_OR_ADMIN), name="dispatch")
+class InvitationListView(ListView):
+    model = Invitation
+    context_object_name = "invites"
+    template_name = "user_list.html"
+
+    def get_queryset(self):
+        return Invitation.objects.filter(customer=self.request.user.customer)
+
+
 @method_decorator(role_required((User.ROLE_OWNER_OR_ADMIN)), name="dispatch")
 class UserCreateItemView(SuccessMessageMixin, CreateView):
     model = User
@@ -683,6 +762,46 @@ class UserCreateItemView(SuccessMessageMixin, CreateView):
             + reverse("accounts-invite-teammates")
             + f"'>Let {cleaned_data['first_name']} know they've been added here →</a>"
         )
+        return mark_safe(s)
+
+
+@method_decorator(role_required((User.ROLE_OWNER_OR_ADMIN)), name="dispatch")
+class InviteCreateItemView(SuccessMessageMixin, CreateView):
+    model = Invitation
+    template_name = "invite_create.html"
+    form_class = InvitationCreateForm
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        if hasattr(self, "request"):
+            kwargs.update({"request": self.request})
+        return kwargs
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+
+        if self.request.user.customer.has_subscription():
+            context[
+                "is_plan_per_seat"
+            ] = self.request.user.customer.subscription.is_plan_per_seat()
+        else:
+            context["is_plan_per_seat"] = False
+        return context
+
+    def get_queryset(self):
+        return Invite.objects.filter(customer=self.request.user.customer)
+
+    def get_success_url(self):
+        if (
+            self.request.user.customer.has_subscription()
+            and self.request.user.customer.subscription.is_plan_per_seat()
+        ):
+            self.request.user.customer.subscription.sync_stripe_subscription_quantity()
+
+        return reverse_lazy("accounts-invitation-list")
+
+    def get_success_message(self, cleaned_data):
+        s = "Invitation has been sent"
         return mark_safe(s)
 
 
